@@ -329,7 +329,7 @@ with tab_history:
 
 with tab_cycle:
     st.subheader("Operating-cycle information")
-    st.caption("Choose a financial year. COGS is fetched from the financial history; credit sales, credit purchases and operating expenditure are calculated from the inputs.")
+    st.caption("Choose a financial year. Sales and COGS are fetched from financial history; enter total purchases. Debtor and creditor periods use total sales and purchases as simplified proxies when credit-only figures are unavailable.")
     days_in_year = st.selectbox("Days in year", [365, 360], index=0)
     cy = history.copy()
     cy["Financial Year"] = cy["Financial Year"].astype(str)
@@ -348,21 +348,15 @@ with tab_cycle:
     with b:
         opening_debtors = st.number_input("Opening Debtors", min_value=0.0, value=35.0)
         closing_debtors = st.number_input("Closing Debtors", min_value=0.0, value=45.0)
-        cash_sales = st.number_input("Cash Sales", min_value=0.0, value=50.0)
-        credit_sales = max(sales_cycle-cash_sales,0.0)
-        st.metric("Calculated Credit Sales", f"{credit_sales:,.2f} {unit}")
+        st.metric("Sales from financial history", f"{sales_cycle:,.2f} {unit}")
     with c:
         opening_creditors = st.number_input("Opening Creditors", min_value=0.0, value=25.0)
         closing_creditors = st.number_input("Closing Creditors", min_value=0.0, value=35.0)
-        total_purchases = st.number_input("Total Purchases", min_value=0.0, value=300.0)
-        cash_purchases = st.number_input("Cash Purchases", min_value=0.0, value=20.0)
-        credit_purchases = max(total_purchases-cash_purchases,0.0)
-        st.metric("Calculated Credit Purchases", f"{credit_purchases:,.2f} {unit}")
+        total_purchases = st.number_input("Purchases", min_value=0.0, value=300.0)
     operating_expenses_ex_cogs = st.number_input("Operating expenses excluding COGS, depreciation and interest", min_value=0.0, value=50.0)
     annual_operating_expenditure = cogs_cycle + operating_expenses_ex_cogs
     st.metric("Calculated Annual Operating Expenditure", f"{annual_operating_expenditure:,.2f} {unit}")
-    if cash_sales > sales_cycle: st.warning("Cash sales exceed total sales for the selected year.")
-    if cash_purchases > total_purchases: st.warning("Cash purchases exceed total purchases.")
+
 
 with tab_wc:
     st.subheader("Projected working-capital assessment")
@@ -370,9 +364,18 @@ with tab_wc:
     d1, d2 = st.columns(2)
     with d1:
         st.markdown("#### Projected current assets")
-        raw_material = st.number_input("Raw material", min_value=0.0, value=40.0)
-        work_in_progress = st.number_input("Work in progress", min_value=0.0, value=20.0)
-        finished_goods = st.number_input("Finished goods", min_value=0.0, value=50.0)
+        cma_stock_basis = st.radio("Stock information available", ["Consolidated stock figure", "Detailed stock breakup"], horizontal=True, key="cma_stock_basis")
+        if cma_stock_basis == "Consolidated stock figure":
+            cma_stock_total = st.number_input("Projected stocks / inventory as per balance sheet", min_value=0.0, value=110.0, key="cma_consolidated_stock")
+        else:
+            st.caption("Enter only the categories disclosed by the borrower. Leave undisclosed or inapplicable categories at zero.")
+            cma_rm = st.number_input("Raw materials (optional)", min_value=0.0, value=0.0, key="cma_rm")
+            cma_wip = st.number_input("Work in progress (optional)", min_value=0.0, value=0.0, key="cma_wip")
+            cma_fg = st.number_input("Finished goods (optional)", min_value=0.0, value=0.0, key="cma_fg")
+            cma_trade = st.number_input("Stock-in-trade (optional)", min_value=0.0, value=0.0, key="cma_trade")
+            cma_other_stock = st.number_input("Other stocks (optional)", min_value=0.0, value=0.0, key="cma_other_stock")
+            cma_stock_total = sum([cma_rm, cma_wip, cma_fg, cma_trade, cma_other_stock])
+        st.metric("Total projected stocks", f"{cma_stock_total:,.2f} {unit}")
         cma_debtors = st.number_input("Projected sundry debtors", min_value=0.0, value=60.0)
         cma_cash = st.number_input("Projected cash and bank", min_value=0.0, value=10.0)
         cma_other_assets = st.number_input("Other current assets", min_value=0.0, value=20.0)
@@ -396,12 +399,19 @@ with tab_dp:
     default_margin = 25.0 if category == "MSME" else 30.0
     margin_pct = st.number_input("Margin (%)", min_value=0.0, max_value=100.0, value=default_margin, step=1.0, key="dp_margin")
     st.markdown("#### 1. Eligible stocks")
-    q1,q2,q3,q4 = st.columns(4)
-    with q1: dp_rm=st.number_input("Raw material",min_value=0.0,value=40.0,key="dp_rm")
-    with q2: dp_wip=st.number_input("Work-in-progress",min_value=0.0,value=20.0,key="dp_wip")
-    with q3: dp_fg=st.number_input("Finished goods",min_value=0.0,value=50.0,key="dp_fg")
-    with q4: dp_other=st.number_input("Other eligible stock",min_value=0.0,value=0.0,key="dp_other")
-    gross_stock=dp_rm+dp_wip+dp_fg+dp_other
+    dp_stock_basis = st.radio("Stock information available", ["Consolidated stock figure", "Detailed stock breakup"], horizontal=True, key="dp_stock_basis")
+    if dp_stock_basis == "Consolidated stock figure":
+        gross_stock = st.number_input("Gross stocks as per latest stock statement / balance sheet", min_value=0.0, value=110.0, key="dp_consolidated_stock")
+    else:
+        st.caption("Enter only the stock categories disclosed. Leave unavailable or inapplicable categories at zero.")
+        q1,q2,q3 = st.columns(3)
+        with q1: dp_rm=st.number_input("Raw materials (optional)",min_value=0.0,value=0.0,key="dp_rm")
+        with q2: dp_wip=st.number_input("Work in progress (optional)",min_value=0.0,value=0.0,key="dp_wip")
+        with q3: dp_fg=st.number_input("Finished goods (optional)",min_value=0.0,value=0.0,key="dp_fg")
+        q4,q5 = st.columns(2)
+        with q4: dp_trade=st.number_input("Stock-in-trade (optional)",min_value=0.0,value=0.0,key="dp_trade")
+        with q5: dp_other=st.number_input("Other eligible stock (optional)",min_value=0.0,value=0.0,key="dp_other")
+        gross_stock=sum([dp_rm,dp_wip,dp_fg,dp_trade,dp_other])
     ineligible_stock=st.number_input("Less: ineligible / obsolete stock",min_value=0.0,value=0.0,key="dp_bad_stock")
     eligible_stock=max(gross_stock-ineligible_stock,0.0)
     st.metric("Eligible Stocks",f"{eligible_stock:,.2f} {unit}")
@@ -530,8 +540,8 @@ if st.session_state.get("run_analysis", False):
     avg_creditors = (opening_creditors + closing_creditors) / 2
 
     inventory_days = safe_divide(avg_inventory * days_in_year, cogs_cycle)
-    debtor_days = safe_divide(avg_debtors * days_in_year, credit_sales)
-    creditor_days = safe_divide(avg_creditors * days_in_year, credit_purchases)
+    debtor_days = safe_divide(avg_debtors * days_in_year, sales_cycle)
+    creditor_days = safe_divide(avg_creditors * days_in_year, total_purchases)
     gross_cycle = inventory_days + debtor_days if pd.notna(inventory_days) and pd.notna(debtor_days) else np.nan
     net_cycle = gross_cycle - creditor_days if pd.notna(gross_cycle) and pd.notna(creditor_days) else np.nan
     cycle_funding = (
@@ -540,7 +550,7 @@ if st.session_state.get("run_analysis", False):
     )
 
     total_cma_ca = sum([
-        raw_material, work_in_progress, finished_goods, cma_debtors, cma_cash, cma_other_assets
+        cma_stock_total, cma_debtors, cma_cash, cma_other_assets
     ])
     total_other_cl = cma_creditors + outstanding_expenses + cma_other_cl
     wc_gap = total_cma_ca - total_other_cl
@@ -557,8 +567,8 @@ if st.session_state.get("run_analysis", False):
     selected_assessment = assessment_map[assessment_method]
 
     inventory_turnover = safe_divide(latest_cogs, avg_inventory)
-    debtor_turnover = safe_divide(credit_sales, avg_debtors)
-    creditor_turnover = safe_divide(credit_purchases, avg_creditors)
+    debtor_turnover = safe_divide(sales_cycle, avg_debtors)
+    creditor_turnover = safe_divide(total_purchases, avg_creditors)
     interest_coverage = safe_divide(latest_ebit, latest_interest)
     gross_margin = safe_divide(latest_gp * 100, latest_sales)
     ebitda_margin = safe_divide(ebitda * 100, latest_sales)
@@ -576,8 +586,8 @@ if st.session_state.get("run_analysis", False):
         ["Operating Profit Margin", operating_margin, "%", "EBIT / Sales × 100"],
         ["Net Profit Margin", net_margin, "%", "Net Profit / Sales × 100"],
         ["Stock Turnover Ratio", inventory_turnover, "times", "COGS / Average Stocks"],
-        ["Debtor Turnover", debtor_turnover, "times", "Credit Sales / Average Debtors"],
-        ["Creditor Turnover", creditor_turnover, "times", "Credit Purchases / Average Creditors"],
+        ["Debtor Turnover", debtor_turnover, "times", "Sales / Average Debtors (simplified)"],
+        ["Creditor Turnover", creditor_turnover, "times", "Purchases / Average Creditors (simplified)"],
     ], columns=["Ratio", "Result", "Unit", "Formula"])
 
     # Trend table with year-on-year absolute and percentage changes.
