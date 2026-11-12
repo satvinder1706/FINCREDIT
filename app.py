@@ -322,7 +322,8 @@ with tab_history:
         "Capital": [60.0, 75.0, 92.0, 110.0, 130.0],
         "Net Profit": [15.0, 22.0, 28.0, 35.0, 43.0],
         "Borrowings": [90.0, 120.0, 160.0, 190.0, 220.0],
-        "Net Working Capital": [40.0, 50.0, 60.0, 75.0, 90.0],
+        "Total Current Assets": [150.0, 190.0, 230.0, 280.0, 330.0],
+        "Total Current Liabilities": [110.0, 140.0, 170.0, 205.0, 240.0],
         "Gross Profit": [75.0, 94.0, 112.0, 135.0, 155.0],
         "EBIT": [35.0, 44.0, 55.0, 67.0, 78.0],
         "Interest Expense": [10.0, 12.0, 15.0, 17.0, 19.0],
@@ -341,6 +342,22 @@ with tab_history:
                for col in default_history.columns if col != "Financial Year"}
         },
     )
+    # NWC is deliberately not editable: calculate it from each year's current assets and current liabilities.
+    history["Total Current Assets"] = pd.to_numeric(history["Total Current Assets"], errors="coerce")
+    history["Total Current Liabilities"] = pd.to_numeric(history["Total Current Liabilities"], errors="coerce")
+    history["Net Working Capital"] = history["Total Current Assets"] - history["Total Current Liabilities"]
+    st.markdown("#### Automatically calculated Net Working Capital")
+    st.dataframe(
+        history[["Financial Year", "Total Current Assets", "Total Current Liabilities", "Net Working Capital"]],
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Total Current Assets": st.column_config.NumberColumn("Total Current Assets", format="%.2f"),
+            "Total Current Liabilities": st.column_config.NumberColumn("Total Current Liabilities", format="%.2f"),
+            "Net Working Capital": st.column_config.NumberColumn("Net Working Capital (Auto)", format="%.2f"),
+        },
+    )
+    st.caption("Enter Total Current Assets and Total Current Liabilities for each year. FINCREDIT calculates NWC automatically; there is no manual NWC input.")
 
 with tab_cycle:
     st.checkbox("I have reviewed the operating-cycle inputs", key="cycle_reviewed")
