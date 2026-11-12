@@ -24,15 +24,15 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-html, body, [class*='css'], .stApp { font-family: 'DejaVu Sans', 'DejaVu Sans', sans-serif; }
+html, body, [class*='css'], .stApp { font-family: 'Times New Roman', Times, serif; }
 :root { --fc-ink:#172b4d; --fc-line:#e2e8f0; }
 .block-container {padding-top:1.5rem; padding-bottom:3rem; max-width:1450px;}
 [data-testid="stAppViewContainer"] {background:linear-gradient(180deg,#f5f8fd 0%,#ffffff 38%);}
 [data-testid="stSidebar"] {background:#f1f5fb; border-right:1px solid #e2e8f0;}
 h1,h2,h3 {color:var(--fc-ink); letter-spacing:-.025em;}
 [data-testid="stMetric"] {background:#fff; border:1px solid var(--fc-line); padding:14px 16px; border-radius:14px; box-shadow:0 3px 12px rgba(25,45,80,.045);}
-[data-testid="stMetricLabel"] {color:#64748b; font-weight:650;}
-[data-testid="stMetricValue"] {color:#172b4d; font-weight:750;}
+[data-testid="stMetricLabel"] {color:#64748b; font-weight:600; font-size:.88rem;}
+[data-testid="stMetricValue"] {color:#172b4d; font-weight:700; font-size:1.25rem !important; line-height:1.25;}
 .stTabs [data-baseweb="tab-list"] {gap:7px; border-bottom:1px solid #e5eaf2;}
 .stTabs [data-baseweb="tab"] {background:#f0f4fa; border-radius:9px 9px 0 0; padding:10px 14px; font-weight:650;}
 .stTabs [aria-selected="true"] {background:#e3edff !important; color:#174a91 !important;}
@@ -89,32 +89,12 @@ def make_excel_report(company, unit, bs_assets, bs_liabilities, history, ratios,
 def make_pdf_report(company, activity, constitution, financial_year, unit,
                     bs_assets, bs_liabilities, history, ratios,
                     oc_summary, wc_summary, dp_summary, observations):
-    """Create a PDF report using embedded DejaVu Sans fonts."""
+    """Create a PDF report using the Times font family."""
     output = io.BytesIO()
 
-    font_regular_candidates = [
-        Path(__file__).parent / "fonts" / "DejaVuSans.ttf",
-        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
-        Path("/usr/share/fonts/dejavu/DejaVuSans.ttf"),
-    ]
-    font_bold_candidates = [
-        Path(__file__).parent / "fonts" / "DejaVuSans-Bold.ttf",
-        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
-        Path("/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf"),
-    ]
-    regular_font = next((p for p in font_regular_candidates if p.exists()), None)
-    bold_font = next((p for p in font_bold_candidates if p.exists()), None)
-    if regular_font is None or bold_font is None:
-        raise FileNotFoundError(
-            "DejaVu Sans font files were not found. Keep the included fonts folder "
-            "alongside app.py when deploying FINCREDIT."
-        )
-
-    # Register once per Streamlit process.
-    if "DejaVu" not in pdfmetrics.getRegisteredFontNames():
-        pdfmetrics.registerFont(TTFont("DejaVu", str(regular_font)))
-    if "DejaVu-Bold" not in pdfmetrics.getRegisteredFontNames():
-        pdfmetrics.registerFont(TTFont("DejaVu-Bold", str(bold_font)))
+    # Built-in PDF fonts are always available in ReportLab.
+    pdf_regular = "Times-Roman"
+    pdf_bold = "Times-Bold"
 
     doc = SimpleDocTemplate(
         output, pagesize=A4, rightMargin=17*mm, leftMargin=17*mm,
@@ -124,26 +104,26 @@ def make_pdf_report(company, activity, constitution, financial_year, unit,
     )
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(
-        name="FC_Title", parent=styles["Title"], fontName="DejaVu-Bold",
+        name="FC_Title", parent=styles["Title"], fontName=pdf_bold,
         fontSize=21, leading=26, textColor=colors.HexColor("#17365D"),
         alignment=TA_LEFT, spaceAfter=4*mm
     ))
     styles.add(ParagraphStyle(
-        name="FC_Subtitle", parent=styles["Normal"], fontName="DejaVu",
+        name="FC_Subtitle", parent=styles["Normal"], fontName=pdf_regular,
         fontSize=9, leading=13, textColor=colors.HexColor("#64748B"),
         spaceAfter=5*mm
     ))
     styles.add(ParagraphStyle(
-        name="FC_H2", parent=styles["Heading2"], fontName="DejaVu-Bold",
+        name="FC_H2", parent=styles["Heading2"], fontName=pdf_bold,
         fontSize=12, leading=16, textColor=colors.HexColor("#1D4E89"),
         spaceBefore=5*mm, spaceAfter=2*mm
     ))
     styles.add(ParagraphStyle(
-        name="FC_Body", parent=styles["BodyText"], fontName="DejaVu",
+        name="FC_Body", parent=styles["BodyText"], fontName=pdf_regular,
         fontSize=8, leading=11, textColor=colors.HexColor("#263445")
     ))
     styles.add(ParagraphStyle(
-        name="FC_Small", parent=styles["BodyText"], fontName="DejaVu",
+        name="FC_Small", parent=styles["BodyText"], fontName=pdf_regular,
         fontSize=7, leading=9, textColor=colors.HexColor("#64748B")
     ))
 
@@ -165,8 +145,8 @@ def make_pdf_report(company, activity, constitution, financial_year, unit,
         tbl.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#17365D")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), "DejaVu-Bold"),
-            ("FONTNAME", (0, 1), (-1, -1), "DejaVu"),
+            ("FONTNAME", (0, 0), (-1, 0), pdf_bold),
+            ("FONTNAME", (0, 1), (-1, -1), pdf_regular),
             ("FONTSIZE", (0, 0), (-1, -1), 7),
             ("LEADING", (0, 0), (-1, -1), 9),
             ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#D8E1EC")),
@@ -236,7 +216,7 @@ def make_pdf_report(company, activity, constitution, financial_year, unit,
 
     def add_page_number(canvas, document):
         canvas.saveState()
-        canvas.setFont("DejaVu", 7)
+        canvas.setFont(pdf_regular, 7)
         canvas.setFillColor(colors.HexColor("#64748B"))
         canvas.drawString(17*mm, 10*mm, "FINCREDIT | Confidential borrower analysis")
         canvas.drawRightString(A4[0]-17*mm, 10*mm, f"Page {document.page}")
@@ -295,21 +275,22 @@ with tab_profile:
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("#### Assets")
-        cash_bank = st.number_input("Cash and bank balances", min_value=0.0, value=15.0, step=1.0)
-        debtors_bs = st.number_input("Sundry debtors", min_value=0.0, value=45.0, step=1.0)
-        stocks_bs = st.number_input("Stocks", min_value=0.0, value=60.0, step=1.0)
-        current_advances = st.number_input("Current loans and advances", min_value=0.0, value=10.0, step=1.0)
-        fixed_assets = st.number_input("Fixed assets (net)", min_value=0.0, value=80.0, step=1.0)
-        other_assets = st.number_input("Other assets", min_value=0.0, value=5.0, step=1.0)
+        cash_bank = st.number_input("Cash & Bank", min_value=0.0, value=15.0, step=1.0)
+        debtors_bs = st.number_input("Sundry Debtors", min_value=0.0, value=45.0, step=1.0)
+        stocks_bs = st.number_input("Stock", min_value=0.0, value=60.0, step=1.0)
+        current_advances = st.number_input("Other Current Assets", min_value=0.0, value=10.0, step=1.0)
+        fixed_assets = st.number_input("Fixed Assets (after depreciation)", min_value=0.0, value=80.0, step=1.0)
+        other_assets = st.number_input("Other Assets (non-current)", min_value=0.0, value=5.0, step=1.0)
     with c2:
-        st.markdown("#### Liabilities and equity")
-        share_capital = st.number_input("Share capital / proprietor's capital", min_value=0.0, value=50.0, step=1.0)
-        reserves = st.number_input("Reserves and surplus", min_value=0.0, value=40.0, step=1.0)
-        term_loans = st.number_input("Term loans", min_value=0.0, value=50.0, step=1.0)
-        cc_borrowings = st.number_input("Cash-credit / working-capital borrowings", min_value=0.0, value=25.0, step=1.0)
-        sundry_creditors = st.number_input("Sundry creditors", min_value=0.0, value=35.0, step=1.0)
-        other_current_liabilities = st.number_input("Other current liabilities", min_value=0.0, value=10.0, step=1.0)
-        other_liabilities = st.number_input("Other liabilities", min_value=0.0, value=5.0, step=1.0)
+        st.markdown("#### Liabilities")
+        share_capital = st.number_input("Capital", min_value=0.0, value=50.0, step=1.0)
+        reserves = st.number_input("Reserves / Surplus (if shown)", min_value=0.0, value=40.0, step=1.0)
+        term_loans = st.number_input("Term Loans", min_value=0.0, value=50.0, step=1.0)
+        cc_borrowings = st.number_input("Bank CC / Working Capital Loan", min_value=0.0, value=25.0, step=1.0)
+        sundry_creditors = st.number_input("Sundry Creditors", min_value=0.0, value=35.0, step=1.0)
+        other_current_liabilities = st.number_input("Expenses Payable & Other Current Liabilities", min_value=0.0, value=10.0, step=1.0)
+        other_liabilities = st.number_input("Other Liabilities (non-current)", min_value=0.0, value=5.0, step=1.0)
+    st.caption("Enter only the items shown in the borrower's balance sheet. Leave items not shown at zero.")
 
     st.markdown("#### TNW adjustments (enter amounts as per applicable policy)")
     t1, t2, t3, t4 = st.columns(4)
@@ -322,6 +303,7 @@ with tab_profile:
     with t4:
         quasi_equity = st.number_input("Eligible quasi-equity*", min_value=0.0, value=0.0, step=1.0)
     st.caption("*Include quasi-equity only where recognised under the applicable bank policy.")
+    st.info("Net Working Capital is calculated automatically as Total Current Assets minus Total Current Liabilities. Current assets include Stock, Sundry Debtors, Cash & Bank and Other Current Assets. Current liabilities include Bank CC / Working Capital Loan, Sundry Creditors and Expenses Payable / Other Current Liabilities.")
 
 with tab_history:
     st.checkbox("I have reviewed the actual and projected financial figures", key="history_reviewed")
@@ -575,10 +557,10 @@ if st.session_state.get("run_analysis", False):
     avg_debtors = (opening_debtors + closing_debtors) / 2
     avg_creditors = (opening_creditors + closing_creditors) / 2
 
-    inventory_days = safe_divide(avg_inventory * days_in_year, cogs_cycle)
+    stock_days = safe_divide(avg_inventory * days_in_year, cogs_cycle)
     debtor_days = safe_divide(avg_debtors * days_in_year, sales_cycle)
     creditor_days = safe_divide(avg_creditors * days_in_year, total_purchases)
-    gross_cycle = inventory_days + debtor_days if pd.notna(inventory_days) and pd.notna(debtor_days) else np.nan
+    gross_cycle = stock_days + debtor_days if pd.notna(stock_days) and pd.notna(debtor_days) else np.nan
     net_cycle = gross_cycle - creditor_days if pd.notna(gross_cycle) and pd.notna(creditor_days) else np.nan
     cycle_funding = (
         annual_operating_expenditure / days_in_year * net_cycle
@@ -609,10 +591,10 @@ if st.session_state.get("run_analysis", False):
         m1, m2, m3 = st.columns(3)
         m1.metric("Total projected current assets", money(total_cma_ca, unit))
         m2.metric("Other current liabilities (excluding bank borrowing)", money(total_other_cl, unit))
-        m3.metric("Net working capital / working-capital gap", money(wc_gap, unit))
+        m3.metric("Working Capital Gap", money(wc_gap, unit))
         st.caption("Calculated as projected current assets minus other current liabilities, excluding bank borrowing. This is the projected working-capital gap used in the MPBF calculations.")
 
-    inventory_turnover = safe_divide(latest_cogs, avg_inventory)
+    stock_turnover = safe_divide(latest_cogs, avg_inventory)
     debtor_turnover = safe_divide(sales_cycle, avg_debtors)
     creditor_turnover = safe_divide(total_purchases, avg_creditors)
     interest_coverage = safe_divide(latest_ebit, latest_interest)
@@ -631,7 +613,7 @@ if st.session_state.get("run_analysis", False):
         ["EBITDA Margin", ebitda_margin, "%", "(EBIT + Depreciation) / Sales × 100"],
         ["Operating Profit Margin", operating_margin, "%", "EBIT / Sales × 100"],
         ["Net Profit Margin", net_margin, "%", "Net Profit / Sales × 100"],
-        ["Stock Turnover Ratio", inventory_turnover, "times", "COGS / Average Stocks"],
+        ["Stock Turnover Ratio", stock_turnover, "times", "COGS / Average Stocks"],
         ["Debtor Turnover", debtor_turnover, "times", "Sales / Average Debtors (simplified)"],
         ["Creditor Turnover", creditor_turnover, "times", "Purchases / Average Creditors (simplified)"],
     ], columns=["Ratio", "Result", "Unit", "Formula"])
@@ -671,7 +653,7 @@ if st.session_state.get("run_analysis", False):
         )
 
     oc_summary = {
-        "Stock holding period (days)": inventory_days,
+        "Stock holding period (days)": stock_days,
         "Debtor days": debtor_days,
         "Creditor days": creditor_days,
         "Gross operating cycle": gross_cycle,
@@ -698,7 +680,7 @@ if st.session_state.get("run_analysis", False):
         k1, k2, k3, k4, k5 = st.columns(5)
         k1.metric("Current ratio", f"{current_ratio:.2f}:1" if pd.notna(current_ratio) else "N/A")
         k2.metric("Quick ratio", f"{quick_ratio:.2f}:1" if pd.notna(quick_ratio) else "N/A")
-        k3.metric("Net working capital (balance sheet)", money(net_working_capital, unit))
+        k3.metric("Net Working Capital (NWC)", money(net_working_capital, unit))
         k4.metric("Adjusted TNW", money(adjusted_tnw, unit))
         k5.metric("Selected WC assessment", money(selected_assessment, unit))
 
