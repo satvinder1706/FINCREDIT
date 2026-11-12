@@ -265,7 +265,31 @@ tab_profile, tab_history, tab_cycle, tab_wc, tab_dp, tab_analysis = st.tabs([
     "💼 Working Capital", "🧮 Drawing Power", "📊 Analysis & Reports",
 ])
 
+# Guided workflow tracker: progress is based on sections the user explicitly marks reviewed.
+workflow_steps = [
+    ("profile_reviewed", "Profile & Balance Sheet"),
+    ("history_reviewed", "Financial History"),
+    ("cycle_reviewed", "Operating Cycle"),
+    ("wc_reviewed", "Working Capital"),
+    ("dp_reviewed", "Drawing Power"),
+]
+completed_steps = sum(bool(st.session_state.get(key, False)) for key, _ in workflow_steps)
+progress_fraction = completed_steps / len(workflow_steps)
+st.markdown("### Your appraisal progress")
+progress_col, status_col = st.columns([4, 1])
+with progress_col:
+    st.progress(progress_fraction, text=f"{completed_steps} of {len(workflow_steps)} sections reviewed")
+with status_col:
+    st.metric("Completion", f"{progress_fraction:.0%}")
+step_cols = st.columns(len(workflow_steps))
+for col, (key, label) in zip(step_cols, workflow_steps):
+    with col:
+        done = bool(st.session_state.get(key, False))
+        st.markdown(f"{'✅' if done else '⬜'} **{label}**")
+st.caption("Mark a section as reviewed after checking its entries. Progress tracks review status, not the correctness or completeness of the financial information.")
+
 with tab_profile:
+    st.checkbox("I have reviewed the borrower profile and balance-sheet entries", key="profile_reviewed")
     st.subheader("Latest balance sheet")
     st.write("Enter the latest available balance-sheet figures.")
     c1, c2 = st.columns(2)
@@ -300,10 +324,18 @@ with tab_profile:
     st.caption("*Include quasi-equity only where recognised under the applicable bank policy.")
 
 with tab_history:
+    st.checkbox("I have reviewed the actual and projected financial figures", key="history_reviewed")
     st.subheader("Historical and projected financial information")
-    st.write("Edit the sample figures directly. Keep three historical years followed by projected years, where available.")
-    default_history = pd.DataFrame({
-        "Financial Year": ["2023-24", "2024-25", "2025-26", "2026-27 (P)", "2027-28 (P)"],
+    st.write("Select how many actual / previous years and projected years you want to enter. The table adjusts automatically.")
+    choose1, choose2 = st.columns(2)
+    with choose1:
+        actual_year_count = st.selectbox("Number of actual / previous years", [1, 2, 3, 4, 5], index=2, key="actual_year_count")
+    with choose2:
+        projected_year_count = st.selectbox("Number of projected years", [0, 1, 2, 3, 4, 5], index=2, key="projected_year_count")
+    actual_labels = ["2023-24", "2024-25", "2025-26", "2026-27", "2027-28"][:actual_year_count]
+    projected_labels = ["2026-27 (P)", "2027-28 (P)", "2028-29 (P)", "2029-30 (P)", "2030-31 (P)"][:projected_year_count]
+    labels = actual_labels + projected_labels
+    sample = {
         "Sales": [300.0, 375.0, 450.0, 540.0, 620.0],
         "Capital": [60.0, 75.0, 92.0, 110.0, 130.0],
         "Net Profit": [15.0, 22.0, 28.0, 35.0, 43.0],
@@ -314,7 +346,8 @@ with tab_history:
         "Interest Expense": [10.0, 12.0, 15.0, 17.0, 19.0],
         "Depreciation": [8.0, 9.0, 10.0, 12.0, 13.0],
         "COGS": [225.0, 281.0, 338.0, 405.0, 465.0],
-    })
+    }
+    default_history = pd.DataFrame({"Financial Year": labels, **{k: v[:len(labels)] for k, v in sample.items()}})
     history = st.data_editor(
         default_history,
         num_rows="dynamic",
@@ -328,6 +361,7 @@ with tab_history:
     )
 
 with tab_cycle:
+    st.checkbox("I have reviewed the operating-cycle inputs", key="cycle_reviewed")
     st.subheader("Operating-cycle information")
     st.caption("Choose a financial year. Sales and COGS are fetched from financial history; enter total purchases. Debtor and creditor periods use total sales and purchases as simplified proxies when credit-only figures are unavailable.")
     days_in_year = st.selectbox("Days in year", [365, 360], index=0)
@@ -359,6 +393,7 @@ with tab_cycle:
 
 
 with tab_wc:
+    st.checkbox("I have reviewed the working-capital assessment inputs", key="wc_reviewed")
     st.subheader("Projected working-capital assessment")
     st.caption("Enter projected current assets and other current liabilities for the assessment period.")
     d1, d2 = st.columns(2)
@@ -393,6 +428,7 @@ with tab_wc:
         ])
 
 with tab_dp:
+    st.checkbox("I have reviewed the drawing-power inputs and eligibility", key="dp_reviewed")
     st.subheader("Drawing Power calculator")
     st.markdown("""<div class="fc-note">Calculate DP from eligible stocks and eligible book debts, less the creditor amount required to be deducted under the bank's policy. The MSME margin defaults to 25% and remains editable.</div>""", unsafe_allow_html=True)
     category = st.selectbox("Borrower category", ["MSME", "Other"], key="dp_category")
@@ -519,8 +555,8 @@ if st.session_state.get("run_analysis", False):
     if numeric_bad or negative_bad:
         st.error("Financial history contains blank, non-numeric or negative figures. Correct the table and analyse again.")
         st.stop()
-    if history_valid.empty or len(history_valid) < 2:
-        st.error("Enter at least two financial years to calculate trends.")
+    if history_valid.empty:
+        st.error("Enter at least one financial year.")
         st.stop()
     if history_valid["Financial Year"].duplicated().any():
         st.error("Financial year labels must be unique.")
@@ -565,6 +601,16 @@ if st.session_state.get("run_analysis", False):
         "MPBF Method II": method2,
     }
     selected_assessment = assessment_map[assessment_method]
+
+    # Display automatically calculated working-capital figures in the WC tab.
+    with tab_wc:
+        st.markdown("---")
+        st.markdown("#### Automatically calculated working capital")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Total projected current assets", money(total_cma_ca, unit))
+        m2.metric("Other current liabilities (excluding bank borrowing)", money(total_other_cl, unit))
+        m3.metric("Net working capital / working-capital gap", money(wc_gap, unit))
+        st.caption("Calculated as projected current assets minus other current liabilities, excluding bank borrowing. This is the projected working-capital gap used in the MPBF calculations.")
 
     inventory_turnover = safe_divide(latest_cogs, avg_inventory)
     debtor_turnover = safe_divide(sales_cycle, avg_debtors)
@@ -649,11 +695,12 @@ if st.session_state.get("run_analysis", False):
         st.header("Analysis results")
         if company_name.strip() == "":
             st.warning("Enter a borrower name in the sidebar.")
-        k1, k2, k3, k4 = st.columns(4)
+        k1, k2, k3, k4, k5 = st.columns(5)
         k1.metric("Current ratio", f"{current_ratio:.2f}:1" if pd.notna(current_ratio) else "N/A")
         k2.metric("Quick ratio", f"{quick_ratio:.2f}:1" if pd.notna(quick_ratio) else "N/A")
-        k3.metric("Adjusted TNW", money(adjusted_tnw, unit))
-        k4.metric("Selected WC assessment", money(selected_assessment, unit))
+        k3.metric("Net working capital (balance sheet)", money(net_working_capital, unit))
+        k4.metric("Adjusted TNW", money(adjusted_tnw, unit))
+        k5.metric("Selected WC assessment", money(selected_assessment, unit))
 
         st.subheader("Financial ratios")
         ratio_display = ratios.copy()
@@ -662,7 +709,10 @@ if st.session_state.get("run_analysis", False):
 
         st.subheader("Financial trend analysis")
         st.dataframe(trend, use_container_width=True, hide_index=True)
-        st.line_chart(trend.set_index("Financial Year")[["Sales", "Capital", "Net Profit", "Borrowings"]])
+        if len(trend) >= 2:
+            st.line_chart(trend.set_index("Financial Year")[["Sales", "Capital", "Net Profit", "Borrowings"]])
+        else:
+            st.info("Only one financial year is available. Financial ratios and assessments are calculated, but year-on-year trends require at least two years.")
 
         st.subheader("Operating cycle")
         st.dataframe(pd.DataFrame([oc_summary]), use_container_width=True, hide_index=True)
