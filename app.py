@@ -6,14 +6,47 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from xml.sax.saxutils import escape
+
 st.set_page_config(
     page_title="FINCREDIT | Financial Analysis",
     page_icon="📊",
     layout="wide",
 )
 
-st.title("FINCREDIT")
-st.caption("Financial Analysis & Working Capital Assessment")
+st.markdown("""
+<style>
+html, body, [class*='css'], .stApp { font-family: 'DejaVu Sans', 'DejaVu Sans', sans-serif; }
+:root { --fc-ink:#172b4d; --fc-line:#e2e8f0; }
+.block-container {padding-top:1.5rem; padding-bottom:3rem; max-width:1450px;}
+[data-testid="stAppViewContainer"] {background:linear-gradient(180deg,#f5f8fd 0%,#ffffff 38%);}
+[data-testid="stSidebar"] {background:#f1f5fb; border-right:1px solid #e2e8f0;}
+h1,h2,h3 {color:var(--fc-ink); letter-spacing:-.025em;}
+[data-testid="stMetric"] {background:#fff; border:1px solid var(--fc-line); padding:14px 16px; border-radius:14px; box-shadow:0 3px 12px rgba(25,45,80,.045);}
+[data-testid="stMetricLabel"] {color:#64748b; font-weight:650;}
+[data-testid="stMetricValue"] {color:#172b4d; font-weight:750;}
+.stTabs [data-baseweb="tab-list"] {gap:7px; border-bottom:1px solid #e5eaf2;}
+.stTabs [data-baseweb="tab"] {background:#f0f4fa; border-radius:9px 9px 0 0; padding:10px 14px; font-weight:650;}
+.stTabs [aria-selected="true"] {background:#e3edff !important; color:#174a91 !important;}
+.stButton>button,.stDownloadButton>button {border-radius:10px; font-weight:700; padding:.6rem 1rem;}
+[data-testid="stDataFrame"] {border:1px solid var(--fc-line); border-radius:12px; overflow:hidden;}
+.fc-hero {background:linear-gradient(115deg,#102b50,#2457a6); color:white; padding:22px 25px; border-radius:18px; margin:8px 0 20px; box-shadow:0 8px 24px rgba(20,55,100,.14);}
+.fc-hero p {color:#dbeafe; margin:4px 0 0;}
+.fc-kicker {font-size:11px; text-transform:uppercase; letter-spacing:.14em; color:#bcd4f6; font-weight:800;}
+.fc-note {background:#f1f6ff; border:1px solid #d9e7fb; border-left:4px solid #3974c6; border-radius:10px; padding:12px 15px; color:#334155; margin:10px 0 16px;}
+@media(max-width:700px){.block-container{padding-left:1rem;padding-right:1rem}.fc-hero{padding:18px}}
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown("""<div class="fc-hero"><div class="fc-kicker">Credit appraisal workspace</div><h1 style="color:white;margin:5px 0 0 0">FINCREDIT</h1><p>Financial intelligence • Working-capital assessment • Drawing power</p></div>""", unsafe_allow_html=True)
 st.info(
     "Prototype for preliminary analysis only. Confirm all figures, classifications, "
     "RBI directions and your bank's current credit policy before using the output in a lending decision."
@@ -28,7 +61,7 @@ def money(value, unit):
     return f"{value:,.2f} {unit}"
 
 def make_excel_report(company, unit, bs_assets, bs_liabilities, history, ratios,
-                      oc_summary, wc_summary, observations):
+                      oc_summary, wc_summary, dp_summary, observations):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         pd.DataFrame(
@@ -39,6 +72,7 @@ def make_excel_report(company, unit, bs_assets, bs_liabilities, history, ratios,
         ratios.to_excel(writer, sheet_name="Financial Ratios", index=False)
         pd.DataFrame([oc_summary]).to_excel(writer, sheet_name="Operating Cycle", index=False)
         pd.DataFrame([wc_summary]).to_excel(writer, sheet_name="Working Capital", index=False)
+        pd.DataFrame([dp_summary]).to_excel(writer, sheet_name="Drawing Power", index=False)
         pd.DataFrame({"Preliminary Observations": observations}).to_excel(
             writer, sheet_name="Observations", index=False
         )
@@ -48,6 +82,167 @@ def make_excel_report(company, unit, bs_assets, bs_liabilities, history, ratios,
             ["Generated on", date.today().isoformat()],
             ["Disclaimer", "Indicative analysis; subject to verification and applicable bank policy."],
         ], columns=["Field", "Value"]).to_excel(writer, sheet_name="Cover", index=False)
+    output.seek(0)
+    return output.getvalue()
+
+
+def make_pdf_report(company, activity, constitution, financial_year, unit,
+                    bs_assets, bs_liabilities, history, ratios,
+                    oc_summary, wc_summary, dp_summary, observations):
+    """Create a PDF report using embedded DejaVu Sans fonts."""
+    output = io.BytesIO()
+
+    font_regular_candidates = [
+        Path(__file__).parent / "fonts" / "DejaVuSans.ttf",
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        Path("/usr/share/fonts/dejavu/DejaVuSans.ttf"),
+    ]
+    font_bold_candidates = [
+        Path(__file__).parent / "fonts" / "DejaVuSans-Bold.ttf",
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+        Path("/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf"),
+    ]
+    regular_font = next((p for p in font_regular_candidates if p.exists()), None)
+    bold_font = next((p for p in font_bold_candidates if p.exists()), None)
+    if regular_font is None or bold_font is None:
+        raise FileNotFoundError(
+            "DejaVu Sans font files were not found. Keep the included fonts folder "
+            "alongside app.py when deploying FINCREDIT."
+        )
+
+    # Register once per Streamlit process.
+    if "DejaVu" not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont("DejaVu", str(regular_font)))
+    if "DejaVu-Bold" not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont("DejaVu-Bold", str(bold_font)))
+
+    doc = SimpleDocTemplate(
+        output, pagesize=A4, rightMargin=17*mm, leftMargin=17*mm,
+        topMargin=17*mm, bottomMargin=17*mm,
+        title=f"FINCREDIT Financial Analysis - {company}",
+        author="FINCREDIT",
+    )
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(
+        name="FC_Title", parent=styles["Title"], fontName="DejaVu-Bold",
+        fontSize=21, leading=26, textColor=colors.HexColor("#17365D"),
+        alignment=TA_LEFT, spaceAfter=4*mm
+    ))
+    styles.add(ParagraphStyle(
+        name="FC_Subtitle", parent=styles["Normal"], fontName="DejaVu",
+        fontSize=9, leading=13, textColor=colors.HexColor("#64748B"),
+        spaceAfter=5*mm
+    ))
+    styles.add(ParagraphStyle(
+        name="FC_H2", parent=styles["Heading2"], fontName="DejaVu-Bold",
+        fontSize=12, leading=16, textColor=colors.HexColor("#1D4E89"),
+        spaceBefore=5*mm, spaceAfter=2*mm
+    ))
+    styles.add(ParagraphStyle(
+        name="FC_Body", parent=styles["BodyText"], fontName="DejaVu",
+        fontSize=8, leading=11, textColor=colors.HexColor("#263445")
+    ))
+    styles.add(ParagraphStyle(
+        name="FC_Small", parent=styles["BodyText"], fontName="DejaVu",
+        fontSize=7, leading=9, textColor=colors.HexColor("#64748B")
+    ))
+
+    def para(value, style="FC_Body"):
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            value = "Not available"
+        return Paragraph(escape(str(value)).replace("\n", "<br/>"), styles[style])
+
+    def table_from_mapping(mapping, first="Particulars", second="Amount"):
+        rows = [[para(first, "FC_Body"), para(second, "FC_Body")]]
+        for key, value in mapping.items():
+            if isinstance(value, (float, np.floating)):
+                value = "N/A" if pd.isna(value) else f"{value:,.2f} {unit}"
+            rows.append([para(key), para(value)])
+        return Table(rows, colWidths=[92*mm, 78*mm], repeatRows=1, hAlign="LEFT")
+
+    def styled_table(data, widths=None):
+        tbl = Table(data, colWidths=widths, repeatRows=1, hAlign="LEFT")
+        tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#17365D")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "DejaVu-Bold"),
+            ("FONTNAME", (0, 1), (-1, -1), "DejaVu"),
+            ("FONTSIZE", (0, 0), (-1, -1), 7),
+            ("LEADING", (0, 0), (-1, -1), 9),
+            ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#D8E1EC")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+             [colors.white, colors.HexColor("#F3F6FA")]),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ]))
+        return tbl
+
+    story = [
+        Paragraph("FINCREDIT", styles["FC_Title"]),
+        Paragraph("Financial Analysis &amp; Working Capital Assessment", styles["FC_Subtitle"]),
+        para(f"Borrower: {company}  |  Activity: {activity}  |  Constitution: {constitution}"),
+        para(f"Financial year: {financial_year}  |  Reporting unit: {unit}  |  Generated: {date.today().isoformat()}"),
+        Spacer(1, 3*mm),
+        para("Prototype report for preliminary analysis only. Verify source documents, classifications, "
+             "eligibility, sanction terms and current bank policy before relying on these figures.", "FC_Small"),
+        Paragraph("Balance Sheet", styles["FC_H2"]),
+    ]
+    bs_rows = [[para("Particulars"), para("Amount")]]
+    for label, amount in list(bs_assets.items()) + list(bs_liabilities.items()):
+        bs_rows.append([para(label), para(f"{amount:,.2f} {unit}")])
+    story.append(styled_table(bs_rows, [92*mm, 78*mm]))
+
+    story.append(Paragraph("Financial History &amp; Trends", styles["FC_H2"]))
+    hist = history.copy()
+    hist = hist.fillna("")
+    hist_data = [[para(c) for c in hist.columns]]
+    for row in hist.astype(str).values.tolist():
+        hist_data.append([para(v) for v in row])
+    col_width = 170*mm / max(len(hist.columns), 1)
+    story.append(styled_table(hist_data, [col_width]*len(hist.columns)))
+
+    story.append(Paragraph("Financial Ratios", styles["FC_H2"]))
+    ratio_data = [[para(c) for c in ratios.columns]]
+    for row in ratios.fillna("").astype(str).values.tolist():
+        ratio_data.append([para(v) for v in row])
+    story.append(styled_table(ratio_data, [38*mm, 27*mm, 20*mm, 85*mm]))
+
+    story.append(Paragraph("Operating Cycle", styles["FC_H2"]))
+    story.append(table_from_mapping(oc_summary))
+    story.append(Paragraph("Working-Capital Assessment", styles["FC_H2"]))
+    story.append(table_from_mapping(wc_summary))
+    story.append(Paragraph("Drawing Power", styles["FC_H2"]))
+    story.append(table_from_mapping(dp_summary))
+
+    story.append(Paragraph("Preliminary Analyst Observations", styles["FC_H2"]))
+    if observations:
+        for item in observations:
+            story.append(Paragraph("• " + escape(str(item)), styles["FC_Body"]))
+            story.append(Spacer(1, 1.5*mm))
+    else:
+        story.append(para("No rule-based flags were triggered. This does not mean the proposal is risk-free."))
+
+    story.append(Spacer(1, 5*mm))
+    story.append(para(
+        "Important: FINCREDIT is an analytical aid, not a credit rating, legal opinion or sanction recommendation. "
+        "The 25% MSME drawing-power margin is a configurable default in this application, not a universal "
+        "RBI-prescribed margin. Apply the margin, debtor eligibility, ageing criteria and creditor deductions "
+        "specified by the bank's current policy and the borrower's sanction terms.",
+        "FC_Small"
+    ))
+
+    def add_page_number(canvas, document):
+        canvas.saveState()
+        canvas.setFont("DejaVu", 7)
+        canvas.setFillColor(colors.HexColor("#64748B"))
+        canvas.drawString(17*mm, 10*mm, "FINCREDIT | Confidential borrower analysis")
+        canvas.drawRightString(A4[0]-17*mm, 10*mm, f"Page {document.page}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=add_page_number, onLaterPages=add_page_number)
     output.seek(0)
     return output.getvalue()
 
@@ -65,12 +260,9 @@ with st.sidebar:
     st.divider()
     st.caption("Enter all monetary amounts in the same selected unit.")
 
-tab_profile, tab_history, tab_cycle, tab_wc, tab_analysis = st.tabs([
-    "Company & Balance Sheet",
-    "Financial History",
-    "Operating Cycle",
-    "Working Capital & CC",
-    "Analysis & Reports",
+tab_profile, tab_history, tab_cycle, tab_wc, tab_dp, tab_analysis = st.tabs([
+    "🏢 Profile & Balance Sheet", "📈 Financial History", "🔄 Operating Cycle",
+    "💼 Working Capital", "🧮 Drawing Power", "📊 Analysis & Reports",
 ])
 
 with tab_profile:
@@ -81,7 +273,7 @@ with tab_profile:
         st.markdown("#### Assets")
         cash_bank = st.number_input("Cash and bank balances", min_value=0.0, value=15.0, step=1.0)
         debtors_bs = st.number_input("Sundry debtors", min_value=0.0, value=45.0, step=1.0)
-        inventory_bs = st.number_input("Inventory / stock", min_value=0.0, value=60.0, step=1.0)
+        stocks_bs = st.number_input("Stocks", min_value=0.0, value=60.0, step=1.0)
         current_advances = st.number_input("Current loans and advances", min_value=0.0, value=10.0, step=1.0)
         fixed_assets = st.number_input("Fixed assets (net)", min_value=0.0, value=80.0, step=1.0)
         other_assets = st.number_input("Other assets", min_value=0.0, value=5.0, step=1.0)
@@ -137,24 +329,40 @@ with tab_history:
 
 with tab_cycle:
     st.subheader("Operating-cycle information")
-    st.caption("Use opening and closing balances for the same period as the activity figures.")
+    st.caption("Choose a financial year. COGS is fetched from the financial history; credit sales, credit purchases and operating expenditure are calculated from the inputs.")
     days_in_year = st.selectbox("Days in year", [365, 360], index=0)
-    a, b, c = st.columns(3)
+    cy = history.copy()
+    cy["Financial Year"] = cy["Financial Year"].astype(str)
+    years = [v for v in cy["Financial Year"].tolist() if "(P)" not in v.upper()] or cy["Financial Year"].tolist()
+    cycle_year = st.selectbox("Financial year", years, index=len(years)-1)
+    row = cy.loc[cy["Financial Year"] == cycle_year].iloc[-1]
+    cogs_value = pd.to_numeric(row["COGS"], errors="coerce")
+    sales_value = pd.to_numeric(row["Sales"], errors="coerce")
+    cogs_cycle = 0.0 if pd.isna(cogs_value) else float(cogs_value)
+    sales_cycle = 0.0 if pd.isna(sales_value) else float(sales_value)
+    a,b,c = st.columns(3)
     with a:
-        opening_inventory = st.number_input("Opening inventory", min_value=0.0, value=50.0)
-        closing_inventory = st.number_input("Closing inventory", min_value=0.0, value=60.0)
-        cogs_cycle = st.number_input("Cost of goods sold for period", min_value=0.0, value=300.0)
+        opening_inventory = st.number_input("Opening Stock", min_value=0.0, value=50.0)
+        closing_inventory = st.number_input("Closing Stock", min_value=0.0, value=60.0)
+        st.metric("COGS from financial history", f"{cogs_cycle:,.2f} {unit}")
     with b:
-        opening_debtors = st.number_input("Opening debtors", min_value=0.0, value=35.0)
-        closing_debtors = st.number_input("Closing debtors", min_value=0.0, value=45.0)
-        credit_sales = st.number_input("Credit sales for period", min_value=0.0, value=400.0)
+        opening_debtors = st.number_input("Opening Debtors", min_value=0.0, value=35.0)
+        closing_debtors = st.number_input("Closing Debtors", min_value=0.0, value=45.0)
+        cash_sales = st.number_input("Cash Sales", min_value=0.0, value=50.0)
+        credit_sales = max(sales_cycle-cash_sales,0.0)
+        st.metric("Calculated Credit Sales", f"{credit_sales:,.2f} {unit}")
     with c:
-        opening_creditors = st.number_input("Opening creditors", min_value=0.0, value=25.0)
-        closing_creditors = st.number_input("Closing creditors", min_value=0.0, value=35.0)
-        credit_purchases = st.number_input("Credit purchases for period", min_value=0.0, value=280.0)
-    annual_operating_expenditure = st.number_input(
-        "Annual operating expenditure (funding estimate)", min_value=0.0, value=350.0
-    )
+        opening_creditors = st.number_input("Opening Creditors", min_value=0.0, value=25.0)
+        closing_creditors = st.number_input("Closing Creditors", min_value=0.0, value=35.0)
+        total_purchases = st.number_input("Total Purchases", min_value=0.0, value=300.0)
+        cash_purchases = st.number_input("Cash Purchases", min_value=0.0, value=20.0)
+        credit_purchases = max(total_purchases-cash_purchases,0.0)
+        st.metric("Calculated Credit Purchases", f"{credit_purchases:,.2f} {unit}")
+    operating_expenses_ex_cogs = st.number_input("Operating expenses excluding COGS, depreciation and interest", min_value=0.0, value=50.0)
+    annual_operating_expenditure = cogs_cycle + operating_expenses_ex_cogs
+    st.metric("Calculated Annual Operating Expenditure", f"{annual_operating_expenditure:,.2f} {unit}")
+    if cash_sales > sales_cycle: st.warning("Cash sales exceed total sales for the selected year.")
+    if cash_purchases > total_purchases: st.warning("Cash purchases exceed total purchases.")
 
 with tab_wc:
     st.subheader("Projected working-capital assessment")
@@ -181,6 +389,50 @@ with tab_wc:
             "Turnover Method", "MPBF Method I", "MPBF Method II"
         ])
 
+with tab_dp:
+    st.subheader("Drawing Power calculator")
+    st.markdown("""<div class="fc-note">Calculate DP from eligible stocks and eligible book debts, less the creditor amount required to be deducted under the bank's policy. The MSME margin defaults to 25% and remains editable.</div>""", unsafe_allow_html=True)
+    category = st.selectbox("Borrower category", ["MSME", "Other"], key="dp_category")
+    default_margin = 25.0 if category == "MSME" else 30.0
+    margin_pct = st.number_input("Margin (%)", min_value=0.0, max_value=100.0, value=default_margin, step=1.0, key="dp_margin")
+    st.markdown("#### 1. Eligible stocks")
+    q1,q2,q3,q4 = st.columns(4)
+    with q1: dp_rm=st.number_input("Raw material",min_value=0.0,value=40.0,key="dp_rm")
+    with q2: dp_wip=st.number_input("Work-in-progress",min_value=0.0,value=20.0,key="dp_wip")
+    with q3: dp_fg=st.number_input("Finished goods",min_value=0.0,value=50.0,key="dp_fg")
+    with q4: dp_other=st.number_input("Other eligible stock",min_value=0.0,value=0.0,key="dp_other")
+    gross_stock=dp_rm+dp_wip+dp_fg+dp_other
+    ineligible_stock=st.number_input("Less: ineligible / obsolete stock",min_value=0.0,value=0.0,key="dp_bad_stock")
+    eligible_stock=max(gross_stock-ineligible_stock,0.0)
+    st.metric("Eligible Stocks",f"{eligible_stock:,.2f} {unit}")
+    st.markdown("#### 2. Eligible book debts and creditor adjustment")
+    r1,r2,r3=st.columns(3)
+    with r1: gross_debts=st.number_input("Book debts / receivables",min_value=0.0,value=60.0,key="dp_debts")
+    with r2: bad_debts=st.number_input("Less: ineligible / overdue book debts",min_value=0.0,value=0.0,key="dp_bad_debts")
+    with r3: dp_creditors=st.number_input("Sundry creditors to be deducted",min_value=0.0,value=40.0,key="dp_creditors",help="Enter the amount required to be deducted under the sanction terms and bank policy.")
+    eligible_debts=max(gross_debts-bad_debts,0.0)
+    st.metric("Eligible Book Debts",f"{eligible_debts:,.2f} {unit}")
+    st.markdown("#### 3. Facility position")
+    f1,f2=st.columns(2)
+    with f1: dp_sanctioned=st.number_input("Sanctioned CC limit",min_value=0.0,value=80.0,key="dp_sanctioned")
+    with f2: dp_outstanding=st.number_input("Present CC outstanding",min_value=0.0,value=25.0,key="dp_outstanding")
+    net_dp_base=eligible_stock+eligible_debts-dp_creditors
+    raw_dp=max(net_dp_base,0.0)*(1-margin_pct/100.0)
+    usable_dp=min(raw_dp,dp_sanctioned)
+    available_dp=max(usable_dp-dp_outstanding,0.0)
+    excess_dp=max(dp_outstanding-usable_dp,0.0)
+    dp_summary={"Borrower category":category,"Margin (%)":margin_pct,"Gross stocks":gross_stock,"Ineligible stocks":ineligible_stock,"Eligible stocks":eligible_stock,"Gross book debts":gross_debts,"Ineligible book debts":bad_debts,"Eligible book debts":eligible_debts,"Sundry creditors deducted":dp_creditors,"Net eligible assets before margin":net_dp_base,"Calculated DP":raw_dp,"Sanctioned CC limit":dp_sanctioned,"Usable DP":usable_dp,"CC outstanding":dp_outstanding,"Available DP":available_dp,"Outstanding above usable DP":excess_dp}
+    m1,m2,m3,m4=st.columns(4)
+    m1.metric("Calculated DP",f"{raw_dp:,.2f} {unit}")
+    m2.metric("Usable DP",f"{usable_dp:,.2f} {unit}")
+    m3.metric("Outstanding",f"{dp_outstanding:,.2f} {unit}")
+    m4.metric("Available DP",f"{available_dp:,.2f} {unit}")
+    st.dataframe(pd.DataFrame([dp_summary]),use_container_width=True,hide_index=True)
+    if ineligible_stock>gross_stock or bad_debts>gross_debts: st.warning("An ineligible amount exceeds its gross balance. Please review the entries.")
+    if net_dp_base<0: st.warning("Net eligible assets are negative; DP has been floored at zero before applying the margin.")
+    if excess_dp>0: st.error(f"Outstanding exceeds usable DP by {excess_dp:,.2f} {unit}.")
+    st.caption("The 25% MSME margin is a configurable default for this application, not a universal RBI-prescribed margin. Apply sanction-specific margins, ageing criteria and creditor deductions.")
+
 with tab_profile:
     st.caption("All figures are in the selected unit. Review the balance-sheet tally in the Analysis tab.")
 
@@ -188,7 +440,7 @@ with tab_profile:
 assets = {
     "Cash and Bank Balance": cash_bank,
     "Sundry Debtors": debtors_bs,
-    "Inventory": inventory_bs,
+    "Stocks": stocks_bs,
     "Current Loans and Advances": current_advances,
     "Fixed Assets": fixed_assets,
     "Other Assets": other_assets,
@@ -204,11 +456,11 @@ liabilities = {
 }
 total_assets = sum(assets.values())
 total_liabilities = sum(liabilities.values())
-current_assets = cash_bank + debtors_bs + inventory_bs + current_advances
+current_assets = cash_bank + debtors_bs + stocks_bs + current_advances
 current_liabilities = cc_borrowings + sundry_creditors + other_current_liabilities
 net_working_capital = current_assets - current_liabilities
 current_ratio = safe_divide(current_assets, current_liabilities)
-quick_ratio = safe_divide(current_assets - inventory_bs, current_liabilities)
+quick_ratio = safe_divide(current_assets - stocks_bs, current_liabilities)
 
 adjusted_tnw = (
     share_capital + reserves - intangible_assets - accumulated_losses
@@ -238,7 +490,7 @@ oc_summary = {}
 wc_summary = {}
 selected_assessment = np.nan
 
-if st.button("Analyse Financial Statements", type="primary", use_container_width=True):
+if st.button("Run FINCREDIT Analysis  →", type="primary", use_container_width=True):
     st.session_state["run_analysis"] = True
 
 if st.session_state.get("run_analysis", False):
@@ -315,7 +567,7 @@ if st.session_state.get("run_analysis", False):
 
     ratios = pd.DataFrame([
         ["Current Ratio", current_ratio, "times", "Current Assets / Current Liabilities"],
-        ["Quick Ratio", quick_ratio, "times", "(Current Assets − Inventory) / Current Liabilities"],
+        ["Quick Ratio", quick_ratio, "times", "(Current Assets − Stocks) / Current Liabilities"],
         ["Debt–Equity", debt_equity, "times", "Total Borrowings / Adjusted TNW"],
         ["TOL / TNW", tol_tnw, "times", "Total Outside Liabilities / Adjusted TNW"],
         ["Interest Coverage", interest_coverage, "times", "EBIT / Interest Expense"],
@@ -323,7 +575,7 @@ if st.session_state.get("run_analysis", False):
         ["EBITDA Margin", ebitda_margin, "%", "(EBIT + Depreciation) / Sales × 100"],
         ["Operating Profit Margin", operating_margin, "%", "EBIT / Sales × 100"],
         ["Net Profit Margin", net_margin, "%", "Net Profit / Sales × 100"],
-        ["Inventory Turnover", inventory_turnover, "times", "COGS / Average Inventory"],
+        ["Stock Turnover Ratio", inventory_turnover, "times", "COGS / Average Stocks"],
         ["Debtor Turnover", debtor_turnover, "times", "Credit Sales / Average Debtors"],
         ["Creditor Turnover", creditor_turnover, "times", "Credit Purchases / Average Creditors"],
     ], columns=["Ratio", "Result", "Unit", "Formula"])
@@ -363,7 +615,7 @@ if st.session_state.get("run_analysis", False):
         )
 
     oc_summary = {
-        "Inventory days": inventory_days,
+        "Stock holding period (days)": inventory_days,
         "Debtor days": debtor_days,
         "Creditor days": creditor_days,
         "Gross operating cycle": gross_cycle,
@@ -410,6 +662,8 @@ if st.session_state.get("run_analysis", False):
 
         st.subheader("Working-capital assessment")
         st.dataframe(pd.DataFrame([wc_summary]), use_container_width=True, hide_index=True)
+        st.subheader("Drawing Power")
+        st.dataframe(pd.DataFrame([dp_summary]), use_container_width=True, hide_index=True)
         if wc_gap < 0:
             st.warning("Other current liabilities exceed projected current assets; working-capital gap is negative.")
         if method1_raw < 0 or method2_raw < 0:
@@ -429,7 +683,7 @@ if st.session_state.get("run_analysis", False):
 
         report = make_excel_report(
             company_name, unit, assets, liabilities, trend, ratios,
-            oc_summary, wc_summary, observations
+            oc_summary, wc_summary, dp_summary, observations
         )
         st.download_button(
             "Download analysis workbook (Excel)",
@@ -438,6 +692,23 @@ if st.session_state.get("run_analysis", False):
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             type="primary",
         )
+
+        try:
+            pdf_report = make_pdf_report(
+                company_name, business_activity, constitution, financial_year, unit,
+                assets, liabilities, trend, ratios, oc_summary, wc_summary,
+                dp_summary, observations
+            )
+            st.download_button(
+                "Download credit analysis report (PDF)",
+                data=pdf_report,
+                file_name=f"{company_name.strip().replace(' ', '_') or 'borrower'}_FINCREDIT_Report.pdf",
+                mime="application/pdf",
+                type="primary",
+            )
+        except Exception as exc:
+            st.error(f"PDF report could not be generated: {exc}")
+
 else:
     st.warning("Enter or review the sample data in the tabs, then click **Analyse Financial Statements**.")
     st.caption("The sample borrower and amounts are illustrative. Replace them with verified borrower data.")
